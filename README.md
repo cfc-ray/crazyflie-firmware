@@ -2,6 +2,8 @@
 
 This project contains the source code for the firmware used in the Crazyflie range of platforms, including the Crazyflie 2.X and the Roadrunner.
 
+**This** ***specific*** **project contains a modified version of the Crazyflie firmware that includes an implementation of L1 Adaptive Control.**
+
 ### Crazyflie 1.0 support
 
 The 2017.06 release was the last release with Crazyflie 1.0 support. If you want
