@@ -1,6 +1,4 @@
 /*
-
-
 LICENSE
 
 
@@ -29,6 +27,15 @@ The following further modifications to 'controller_mellinger.c' were made for th
 * L1 Adaptive Control augmentation added
 */
 
+#include <string.h>
+#include <stdint.h>
+#include <stdbool.h>
+
+#include "app.h"
+
+#include "FreeRTOS.h"
+#include "task.h"
+
 #include <math.h>
 #include "param.h"
 #include "log.h"
@@ -37,6 +44,40 @@ The following further modifications to 'controller_mellinger.c' were made for th
 #include "controller_L1.h"
 #include "physicalConstants.h"
 #include "stabilizer.h"
+
+#define DEBUG_MODULE "CONTROLLER_L1"
+#include "debug.h"
+
+
+// appMain() function necessary for OOT implementation
+void appMain() {
+  DEBUG_PRINT("Waiting for activation ...\n");
+
+  while(1) {
+    vTaskDelay(M2T(2000));
+  }
+}
+
+
+void controllerOutOfTreeInit() {
+  controllerL1Init();
+}
+
+void controllerOutOfTreeReset() {
+  controllerL1Reset();
+}
+
+void controllerOutOfTreeTest() {
+  controllerL1Test();
+}
+
+void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
+                                         const sensorData_t *sensors,
+                                         const state_t *state,
+                                         const uint32_t tick) {
+  controllerL1(control, setpoint, sensors, state, tick);
+}
+
 
 // physical parameters
 static const float g_vehicleMass = CF_MASS;
@@ -87,7 +128,7 @@ static struct mat33 Rprev =
       {0.0f, 0.0f, 0.0f}}};
 
 
-// L1 variables
+// L1 activation booleans
 static uint8_t L1_enable = 0;
 static uint8_t L1_enable_prev = 0;
 static uint8_t inj_enable = 0;
@@ -202,7 +243,7 @@ void setGainsL1(void)
 
   Changing these is okay
   */
-
+ 
   kp_x = 0.4;
   kp_y = 0.4;
   kp_z = 1.25;
@@ -211,13 +252,13 @@ void setGainsL1(void)
   kv_y = 0.2;
   kv_z = 0.4;
 
-  kr_x = 50000;
-  kr_y = 50000;
-  kr_z = 30000;
+  kr_x = 70000;
+  kr_y = 70000;
+  kr_z = 60000;
 
-  ko_x = 10000;
-  ko_y = 10000;
-  ko_z = 8000;
+  ko_x = 20000;
+  ko_y = 20000;
+  ko_z = 12000;
 
   kd_omega_rp = 200;
 }
@@ -717,7 +758,6 @@ void controllerL1(control_t *control, const setpoint_t *setpoint,
 
 
 
-
 PARAM_GROUP_START(ctrlL1params)
 
 // gains
@@ -735,7 +775,7 @@ PARAM_ADD(PARAM_FLOAT, ko_y, &ko_y)
 PARAM_ADD(PARAM_FLOAT, ko_z, &ko_z)
 PARAM_ADD(PARAM_FLOAT, kd_omega_rp, &kd_omega_rp)
 
-// L1
+// L1 bools
 PARAM_ADD(PARAM_UINT8, L1_enable, &L1_enable)
 PARAM_ADD(PARAM_UINT8, inj_enable, &inj_enable)
 
@@ -744,6 +784,7 @@ PARAM_ADD(PARAM_FLOAT, w_f1, &w_f1)
 PARAM_ADD(PARAM_FLOAT, w_f2, &w_f2)
 PARAM_ADD(PARAM_FLOAT, w_m1, &w_m1)
 PARAM_ADD(PARAM_FLOAT, w_m2, &w_m2)
+
 PARAM_GROUP_STOP(ctrlL1params)
 
 
