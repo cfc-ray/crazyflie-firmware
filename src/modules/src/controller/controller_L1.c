@@ -55,23 +55,23 @@ static struct mat33 Jinv =
 
 
 // geometric controller gains
-static float kp_x;
-static float kp_y;
-static float kp_z;
+static float kp_x = 0.4;
+static float kp_y = 0.4;
+static float kp_z = 1.25;
 
-static float kv_x;
-static float kv_y;
-static float kv_z;
+static float kv_x = 0.2;
+static float kv_y = 0.2;
+static float kv_z = 0.4;
 
-static float kr_x;
-static float kr_y;
-static float kr_z;
+static float kr_x = 70000;
+static float kr_y = 70000;
+static float kr_z = 40000;
 
-static float ko_x;
-static float ko_y;
-static float ko_z;
+static float ko_x = 15000;
+static float ko_y = 15000;
+static float ko_z = 12000;
 
-static float kd_omega_rp;
+static float kd_omega_rp = 200;
 
 
 // state variables
@@ -88,8 +88,6 @@ static struct mat33 Rprev =
 
 
 // L1 variables
-static uint8_t L1_enable = 0;
-static uint8_t L1_enable_prev = 0;
 static uint8_t inj_enable = 0;
 static uint8_t inj_enable_prev = 0;
 
@@ -108,10 +106,10 @@ static struct vec sigma_f;
 static struct vec sigma_m;
 
 // low pass filter
-static float w_f1 =  2.0f;
+static float w_f1 =  3.0f;
 static float w_f2 =  2.0f;
 static float w_m1 = 10.0f;
-static float w_m2 =  3.0f;
+static float w_m2 =  2.0f;
 
 static float lpf_f1_coef1;
 static float lpf_f1_coef2;
@@ -167,61 +165,6 @@ static float cmd_yaw_prev;
 // other
 static float sigma_inj_fz = 0.0f;
 
-
-void setGainsMellinger(void)
-{
-  /*
-  These are the stock mellinger gains that are used when L1 is OFF.
-
-  Do not change these
-  */
- 
-  kp_x = 0.4;
-  kp_y = 0.4;
-  kp_z = 1.25;
-
-  kv_x = 0.2;
-  kv_y = 0.2;
-  kv_z = 0.4;
-
-  kr_x = 70000;
-  kr_y = 70000;
-  kr_z = 60000;
-
-  ko_x = 20000;
-  ko_y = 20000;
-  ko_z = 12000;
-
-  kd_omega_rp = 200;
-}
-
-void setGainsL1(void)
-{
-  /*
-  These are mellinger gains that have been de-tuned a bit, to give L1 some room to operate.
-
-  Changing these is okay
-  */
-
-  kp_x = 0.4;
-  kp_y = 0.4;
-  kp_z = 1.25;
-
-  kv_x = 0.2;
-  kv_y = 0.2;
-  kv_z = 0.4;
-
-  kr_x = 50000;
-  kr_y = 50000;
-  kr_z = 30000;
-
-  ko_x = 10000;
-  ko_y = 10000;
-  ko_z = 8000;
-
-  kd_omega_rp = 200;
-}
-
 void resetL1(void)
 {
   // reset state predictor
@@ -256,14 +199,10 @@ void resetL1(void)
 
 void controllerL1Reset(void)
 {
-  L1_enable = 0;
-  L1_enable_prev = 0;
   inj_enable = 0;
   inj_enable_prev = 0;
 
   resetL1();
-
-  setGainsMellinger();
 }
 
 void controllerL1Init(void)
@@ -452,17 +391,6 @@ void controllerL1(control_t *control, const setpoint_t *setpoint,
     return;
   }
 
-  // switch gains if L1 was just turned on
-  if (L1_enable && !L1_enable_prev){
-    setGainsL1();
-    resetL1();
-  }
-  // switch gains if L1 was just turned off
-  else if (!L1_enable && L1_enable_prev){
-    setGainsMellinger();
-    resetL1();
-  }
-
   dt = (float)(1.0f/ATTITUDE_RATE);
   struct vec setpointPos = mkvec(setpoint->position.x, setpoint->position.y, setpoint->position.z);
   struct vec setpointVel = mkvec(setpoint->velocity.x, setpoint->velocity.y, setpoint->velocity.z);
@@ -626,10 +554,6 @@ void controllerL1(control_t *control, const setpoint_t *setpoint,
   }
 
 
-
-
-
-
   // convert baseline control inputs into standard units
   bslnPWMtoSI();
 
@@ -639,19 +563,9 @@ void controllerL1(control_t *control, const setpoint_t *setpoint,
   }
 
   // compute total control inputs (baseline + adjusted) in standard units
-  if (L1_enable){
-    cmd_SI_thrust = bsln_SI_thrust + adj_SI_thrust;
-    cmd_SI_moments = vadd(bsln_SI_moments, adj_SI_moments);
-  }
-  else{
-    cmd_SI_thrust = bsln_SI_thrust;
-    cmd_SI_moments = bsln_SI_moments;
-  }
-
-
-
-
-
+  cmd_SI_thrust = bsln_SI_thrust + adj_SI_thrust;
+  cmd_SI_moments = vadd(bsln_SI_moments, adj_SI_moments);
+  
 
 
   // -------------------------------------------- INJECT UNCERTAINTY HERE ----------------------------------------------
@@ -697,7 +611,6 @@ void controllerL1(control_t *control, const setpoint_t *setpoint,
 
   // iterate
   t += dt;
-  L1_enable_prev = L1_enable;
   inj_enable_prev = inj_enable;
   stateVelPrev = stateVel;
   stateOmegaPrev = stateOmega;
@@ -736,7 +649,6 @@ PARAM_ADD(PARAM_FLOAT, ko_z, &ko_z)
 PARAM_ADD(PARAM_FLOAT, kd_omega_rp, &kd_omega_rp)
 
 // L1
-PARAM_ADD(PARAM_UINT8, L1_enable, &L1_enable)
 PARAM_ADD(PARAM_UINT8, inj_enable, &inj_enable)
 
 // LPF cutoff frequencies
@@ -816,7 +728,6 @@ LOG_ADD(LOG_FLOAT, filtd_mx, &sigma_m_filt2.x)
 LOG_ADD(LOG_FLOAT, filtd_my, &sigma_m_filt2.y)
 LOG_ADD(LOG_FLOAT, filtd_mz, &sigma_m_filt2.z)
 
-LOG_ADD(LOG_UINT8, L1_enable, &L1_enable)
 LOG_ADD(LOG_UINT8, inj_enable, &inj_enable)
 LOG_ADD(LOG_FLOAT, t, &t)
 
