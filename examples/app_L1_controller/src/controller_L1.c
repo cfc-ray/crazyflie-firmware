@@ -41,7 +41,6 @@ The following further modifications to 'controller_mellinger.c' were made for th
 #include "log.h"
 #include "math3d.h"
 #include "position_controller.h"
-#include "controller_L1.h"
 #include "physicalConstants.h"
 #include "stabilizer.h"
 
@@ -49,7 +48,10 @@ The following further modifications to 'controller_mellinger.c' were made for th
 #include "debug.h"
 
 
-// appMain() function necessary for OOT implementation
+//////////////////////////////////////////////////////////////////////////////
+//// the following is necessary to configure L1 controller for OOT build /////
+//////////////////////////////////////////////////////////////////////////////
+
 void appMain() {
   DEBUG_PRINT("Waiting for activation ...\n");
 
@@ -57,7 +59,6 @@ void appMain() {
     vTaskDelay(M2T(2000));
   }
 }
-
 
 void controllerOutOfTreeInit() {
   controllerL1Init();
@@ -78,6 +79,10 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
   controllerL1(control, setpoint, sensors, state, tick);
 }
 
+//////////////////////////////////////////////////////////////////////////////
+/////////////////// DEFINITION OF VARIABLES AND PARAMETERS ///////////////////
+//////////////////////////////////////////////////////////////////////////////
+
 
 // physical parameters
 static const float g_vehicleMass = CF_MASS;
@@ -96,23 +101,24 @@ static struct mat33 Jinv =
 
 
 // geometric controller gains
-static float kp_x;
-static float kp_y;
-static float kp_z;
+// these are based on the stock Mellinger gains, but tuned to increase performance with L1
+static float kp_x = 0.4;
+static float kp_y = 0.4;
+static float kp_z = 1.25;
 
-static float kv_x;
-static float kv_y;
-static float kv_z;
+static float kv_x = 0.2;
+static float kv_y = 0.2;
+static float kv_z = 0.4;
 
-static float kr_x;
-static float kr_y;
-static float kr_z;
+static float kr_x = 70000;
+static float kr_y = 70000;
+static float kr_z = 40000;
 
-static float ko_x;
-static float ko_y;
-static float ko_z;
+static float ko_x = 15000;
+static float ko_y = 15000;
+static float ko_z = 12000;
 
-static float kd_omega_rp;
+static float kd_omega_rp = 200;
 
 
 // state variables
@@ -128,11 +134,10 @@ static struct mat33 Rprev =
       {0.0f, 0.0f, 0.0f}}};
 
 
-// L1 activation booleans
-static uint8_t L1_enable = 0;
-static uint8_t L1_enable_prev = 0;
+// uncertainty injection
 static uint8_t inj_enable = 0;
 static uint8_t inj_enable_prev = 0;
+static float sigma_inj_fz = 0.0f;
 
 // state predictor
 static struct vec v_tilda;
@@ -149,10 +154,10 @@ static struct vec sigma_f;
 static struct vec sigma_m;
 
 // low pass filter
-static float w_f1 =  2.0f;
+static float w_f1 =  3.0f;
 static float w_f2 =  2.0f;
 static float w_m1 = 10.0f;
-static float w_m2 =  3.0f;
+static float w_m2 =  2.0f;
 
 static float lpf_f1_coef1;
 static float lpf_f1_coef2;
@@ -173,7 +178,8 @@ static struct vec sigma_m_filt1_prev;
 static struct vec sigma_m_filt2_prev;
 
 // PWM to SI conversion
-static float thrustToTorque = 0.005964552f;
+static float thrustToTorque = 0.005964552f;// other
+
 
 // logging variables
 static struct vec z_axis_desired;
@@ -205,118 +211,10 @@ static float cmd_roll_prev;
 static float cmd_pitch_prev;
 static float cmd_yaw_prev;
 
-// other
-static float sigma_inj_fz = 0.0f;
 
-
-void setGainsMellinger(void)
-{
-  /*
-  These are the stock mellinger gains that are used when L1 is OFF.
-
-  Do not change these
-  */
- 
-  kp_x = 0.4;
-  kp_y = 0.4;
-  kp_z = 1.25;
-
-  kv_x = 0.2;
-  kv_y = 0.2;
-  kv_z = 0.4;
-
-  kr_x = 70000;
-  kr_y = 70000;
-  kr_z = 60000;
-
-  ko_x = 20000;
-  ko_y = 20000;
-  ko_z = 12000;
-
-  kd_omega_rp = 200;
-}
-
-void setGainsL1(void)
-{
-  /*
-  These are mellinger gains that have been de-tuned a bit, to give L1 some room to operate.
-
-  Changing these is okay
-  */
- 
-  kp_x = 0.4;
-  kp_y = 0.4;
-  kp_z = 1.25;
-
-  kv_x = 0.2;
-  kv_y = 0.2;
-  kv_z = 0.4;
-
-  kr_x = 70000;
-  kr_y = 70000;
-  kr_z = 60000;
-
-  ko_x = 20000;
-  ko_y = 20000;
-  ko_z = 12000;
-
-  kd_omega_rp = 200;
-}
-
-void resetL1(void)
-{
-  // reset state predictor
-  v_hat = mkvec(0.0f, 0.0f, 0.0f);
-  w_hat = mkvec(0.0f, 0.0f, 0.0f);
-  v_tilda = mkvec(0.0f, 0.0f, 0.0f);
-  w_tilda = mkvec(0.0f, 0.0f, 0.0f);
-  v_hat_prev = mkvec(0.0f, 0.0f, 0.0f);
-  w_hat_prev = mkvec(0.0f, 0.0f, 0.0f);
-
-  // reset adaptation law
-  sigma_f = mkvec(0.0f, 0.0f, 0.0f);
-  sigma_m = mkvec(0.0f, 0.0f, 0.0f);
-
-  // reset LPF
-  sigma_fz_filt1 = 0.0f;
-  sigma_fz_filt2 = 0.0f;
-  sigma_m_filt1 = mkvec(0.0f, 0.0f, 0.0f);
-  sigma_m_filt2 = mkvec(0.0f, 0.0f, 0.0f);
-  sigma_fz_filt1_prev = 0.0f;
-  sigma_fz_filt2_prev = 0.0f;
-  sigma_m_filt1_prev = mkvec(0.0f, 0.0f, 0.0f);
-  sigma_m_filt2_prev = mkvec(0.0f, 0.0f, 0.0f);
-
-  // reset adjusted inputs
-  adj_SI_thrust = 0.0f;
-  adj_SI_moments = mkvec(0.0f, 0.0f, 0.0f);
-  adj_SI_thrust_prev = 0.0f;
-  adj_SI_moments_prev = mkvec(0.0f, 0.0f, 0.0f);
-}
-
-
-void controllerL1Reset(void)
-{
-  L1_enable = 0;
-  L1_enable_prev = 0;
-  inj_enable = 0;
-  inj_enable_prev = 0;
-
-  resetL1();
-
-  setGainsMellinger();
-}
-
-void controllerL1Init(void)
-{
-  controllerL1Reset();
-}
-
-bool controllerL1Test(void)
-{
-  return true;
-}
-
+//////////////////////////////////////////////////////////////////////////////
+////////////////////////////// HELPER FUNCTIONS //////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
 
 void bslnPWMtoSI(void)
 {
@@ -368,6 +266,10 @@ void cmdSItoPWM(void)
   cmd_yaw    = (-cmd_m1_pwm + cmd_m2_pwm - cmd_m3_pwm + cmd_m4_pwm) * (0.25f);
 }
 
+
+//////////////////////////////////////////////////////////////////////////////
+//////////////////////////////// L1 ALGORITHM ////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
 
 void L1Augmentation(struct mat33 currentR, struct vec currentVel, struct vec currentOmega, float dt) 
 {
@@ -468,6 +370,81 @@ void L1Augmentation(struct mat33 currentR, struct vec currentVel, struct vec cur
 }
 
 
+void compute_injected_uncertainty() {
+  if (inj_enable) {
+    if (!inj_enable_prev){
+      t0 = t;
+    }
+    else{
+
+      // vvvv INJECT UNCERTAINTY HERE vvvv
+
+      sigma_inj_fz = 0.15f*sinf(0.25f*(t-t0));
+
+      // ^^^^ INJECT UNCERTAINTY HERE ^^^^
+    }
+  }
+  else if (fabsf(sigma_inj_fz) > 0.001f){
+    sigma_inj_fz *= 0.99f;
+  }
+
+  else{
+    sigma_inj_fz = 0.0f;
+  }
+}
+
+
+//////////////////////////////////////////////////////////////////////////////
+///////////////////////// MAIN CONTROLLER FUNCTIONS //////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+
+
+void controllerL1Reset(void)
+{
+  // reset state predictor
+  v_hat = mkvec(0.0f, 0.0f, 0.0f);
+  w_hat = mkvec(0.0f, 0.0f, 0.0f);
+  v_tilda = mkvec(0.0f, 0.0f, 0.0f);
+  w_tilda = mkvec(0.0f, 0.0f, 0.0f);
+  v_hat_prev = mkvec(0.0f, 0.0f, 0.0f);
+  w_hat_prev = mkvec(0.0f, 0.0f, 0.0f);
+
+  // reset adaptation law
+  sigma_f = mkvec(0.0f, 0.0f, 0.0f);
+  sigma_m = mkvec(0.0f, 0.0f, 0.0f);
+
+  // reset LPF
+  sigma_fz_filt1 = 0.0f;
+  sigma_fz_filt2 = 0.0f;
+  sigma_m_filt1 = mkvec(0.0f, 0.0f, 0.0f);
+  sigma_m_filt2 = mkvec(0.0f, 0.0f, 0.0f);
+  sigma_fz_filt1_prev = 0.0f;
+  sigma_fz_filt2_prev = 0.0f;
+  sigma_m_filt1_prev = mkvec(0.0f, 0.0f, 0.0f);
+  sigma_m_filt2_prev = mkvec(0.0f, 0.0f, 0.0f);
+
+  // reset adjusted inputs
+  adj_SI_thrust = 0.0f;
+  adj_SI_moments = mkvec(0.0f, 0.0f, 0.0f);
+  adj_SI_thrust_prev = 0.0f;
+  adj_SI_moments_prev = mkvec(0.0f, 0.0f, 0.0f);
+
+  // reset uncertainty injection
+  sigma_inj_fz = 0.0f;
+  inj_enable = 0;
+  inj_enable_prev = 0;
+}
+
+void controllerL1Init(void)
+{
+  controllerL1Reset();
+}
+
+bool controllerL1Test(void)
+{
+  return true;
+}
+
 
 void controllerL1(control_t *control, const setpoint_t *setpoint,
                                          const sensorData_t *sensors,
@@ -491,17 +468,6 @@ void controllerL1(control_t *control, const setpoint_t *setpoint,
 
   if (!RATE_DO_EXECUTE(ATTITUDE_RATE, tick)) {
     return;
-  }
-
-  // switch gains if L1 was just turned on
-  if (L1_enable && !L1_enable_prev){
-    setGainsL1();
-    resetL1();
-  }
-  // switch gains if L1 was just turned off
-  else if (!L1_enable && L1_enable_prev){
-    setGainsMellinger();
-    resetL1();
   }
 
   dt = (float)(1.0f/ATTITUDE_RATE);
@@ -667,10 +633,6 @@ void controllerL1(control_t *control, const setpoint_t *setpoint,
   }
 
 
-
-
-
-
   // convert baseline control inputs into standard units
   bslnPWMtoSI();
 
@@ -680,52 +642,12 @@ void controllerL1(control_t *control, const setpoint_t *setpoint,
   }
 
   // compute total control inputs (baseline + adjusted) in standard units
-  if (L1_enable){
-    cmd_SI_thrust = bsln_SI_thrust + adj_SI_thrust;
-    cmd_SI_moments = vadd(bsln_SI_moments, adj_SI_moments);
-  }
-  else{
-    cmd_SI_thrust = bsln_SI_thrust;
-    cmd_SI_moments = bsln_SI_moments;
-  }
-
-
-
-
-
-
-
-  // -------------------------------------------- INJECT UNCERTAINTY HERE ----------------------------------------------
-
-  if (inj_enable) {
-    if (!inj_enable_prev){
-      t0 = t;
-    }
-    else{
-
-      // vvvv INJECT UNCERTAINTY HERE vvvv
-
-      sigma_inj_fz = 0.15f*sinf(0.25f*(t-t0));
-
-      // ^^^^ INJECT UNCERTAINTY HERE ^^^^
-    }
-  }
-  else if (fabsf(sigma_inj_fz) > 0.001f){
-    sigma_inj_fz *= 0.99f;
-  }
-
-  else{
-    sigma_inj_fz = 0.0f;
-  }
-
-
+  cmd_SI_thrust = bsln_SI_thrust + adj_SI_thrust;
+  cmd_SI_moments = vadd(bsln_SI_moments, adj_SI_moments);
+  
+  // inject uncertainty
+  compute_injected_uncertainty();
   cmd_SI_thrust += sigma_inj_fz;
-
-
-  // -----------------------------------------------------------------------------------------------------------------------
-
-
-
 
   // convert total control inputs back into CF units, from standard units
   cmdSItoPWM();
@@ -738,7 +660,6 @@ void controllerL1(control_t *control, const setpoint_t *setpoint,
 
   // iterate
   t += dt;
-  L1_enable_prev = L1_enable;
   inj_enable_prev = inj_enable;
   stateVelPrev = stateVel;
   stateOmegaPrev = stateOmega;
@@ -756,6 +677,10 @@ void controllerL1(control_t *control, const setpoint_t *setpoint,
 }
 
 
+
+//////////////////////////////////////////////////////////////////////////////
+////////////////////// PARAMETER & LOG GROUP DEFINITION //////////////////////
+//////////////////////////////////////////////////////////////////////////////
 
 
 PARAM_GROUP_START(ctrlL1params)
@@ -775,8 +700,7 @@ PARAM_ADD(PARAM_FLOAT, ko_y, &ko_y)
 PARAM_ADD(PARAM_FLOAT, ko_z, &ko_z)
 PARAM_ADD(PARAM_FLOAT, kd_omega_rp, &kd_omega_rp)
 
-// L1 bools
-PARAM_ADD(PARAM_UINT8, L1_enable, &L1_enable)
+// L1
 PARAM_ADD(PARAM_UINT8, inj_enable, &inj_enable)
 
 // LPF cutoff frequencies
@@ -784,7 +708,6 @@ PARAM_ADD(PARAM_FLOAT, w_f1, &w_f1)
 PARAM_ADD(PARAM_FLOAT, w_f2, &w_f2)
 PARAM_ADD(PARAM_FLOAT, w_m1, &w_m1)
 PARAM_ADD(PARAM_FLOAT, w_m2, &w_m2)
-
 PARAM_GROUP_STOP(ctrlL1params)
 
 
@@ -857,7 +780,6 @@ LOG_ADD(LOG_FLOAT, filtd_mx, &sigma_m_filt2.x)
 LOG_ADD(LOG_FLOAT, filtd_my, &sigma_m_filt2.y)
 LOG_ADD(LOG_FLOAT, filtd_mz, &sigma_m_filt2.z)
 
-LOG_ADD(LOG_UINT8, L1_enable, &L1_enable)
 LOG_ADD(LOG_UINT8, inj_enable, &inj_enable)
 LOG_ADD(LOG_FLOAT, t, &t)
 
@@ -867,4 +789,3 @@ LOG_ADD(LOG_FLOAT, w_m1, &w_m1)
 LOG_ADD(LOG_FLOAT, w_m2, &w_m2)
 
 LOG_GROUP_STOP(ctrlL1)
-
