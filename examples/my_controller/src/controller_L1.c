@@ -1,8 +1,6 @@
 /*
 LICENSE
 
-
-
 This controller is based on the work detailed in the following publication:
 
 Z. Wu∗, S. Cheng∗, P. Zhao, A. Gahlawat, K. A. Ackerman, A. Lakshmanan, C. Yang, J. Yu, and N. Hovakimyan:
@@ -25,6 +23,8 @@ The following modifications to this publication were made in 'controller_melling
 The following further modifications to 'controller_mellinger.c' were made for this controller:
 * Integral terms REMOVED
 * L1 Adaptive Control augmentation added
+* retuning of controller gains
+
 */
 
 #include <string.h>
@@ -44,44 +44,16 @@ The following further modifications to 'controller_mellinger.c' were made for th
 #include "physicalConstants.h"
 #include "stabilizer.h"
 
-#define DEBUG_MODULE "CONTROLLER_L1"
-#include "debug.h"
+#include "controller.h"
+#include "controller_L1.h"
 
-
-//////////////////////////////////////////////////////////////////////////////
-//// the following is necessary to configure L1 controller for OOT build /////
-//////////////////////////////////////////////////////////////////////////////
-
-void appMain() {
-  DEBUG_PRINT("Waiting for activation ...\n");
-
-  while(1) {
-    vTaskDelay(M2T(2000));
-  }
-}
-
-void controllerOutOfTreeInit() {
-  controllerL1Init();
-}
-
-void controllerOutOfTreeReset() {
-  controllerL1Reset();
-}
-
-void controllerOutOfTreeTest() {
-  controllerL1Test();
-}
-
-void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
-                                         const sensorData_t *sensors,
-                                         const state_t *state,
-                                         const uint32_t tick) {
-  controllerL1(control, setpoint, sensors, state, tick);
-}
 
 //////////////////////////////////////////////////////////////////////////////
 /////////////////// DEFINITION OF VARIABLES AND PARAMETERS ///////////////////
 //////////////////////////////////////////////////////////////////////////////
+
+
+static bool is_active_controller = false;
 
 
 // physical parameters
@@ -216,7 +188,7 @@ static float cmd_yaw_prev;
 ////////////////////////////// HELPER FUNCTIONS //////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
 
-void bslnPWMtoSI(void)
+void bslnPWMtoSI()
 {
   // convert u_b in PWM to motor power commands in PWM
   float t = bsln_pwm_thrust;
@@ -242,7 +214,7 @@ void bslnPWMtoSI(void)
 
 }
 
-void cmdSItoPWM(void)
+void cmdSItoPWM()
 {
   // convert u_adj in SI to motor power commands in SI
   float t = cmd_SI_thrust    * (0.25f);
@@ -399,7 +371,7 @@ void compute_injected_uncertainty() {
 //////////////////////////////////////////////////////////////////////////////
 
 
-void controllerL1Reset(void)
+void controllerL1Reset()
 {
   // reset state predictor
   v_hat = mkvec(0.0f, 0.0f, 0.0f);
@@ -435,12 +407,13 @@ void controllerL1Reset(void)
   inj_enable_prev = 0;
 }
 
-void controllerL1Init(void)
+void controllerL1Init()
 {
+  is_active_controller = true;
   controllerL1Reset();
 }
 
-bool controllerL1Test(void)
+bool controllerL1Test()
 {
   return true;
 }
@@ -449,7 +422,7 @@ bool controllerL1Test(void)
 void controllerL1(control_t *control, const setpoint_t *setpoint,
                                          const sensorData_t *sensors,
                                          const state_t *state,
-                                         const uint32_t tick)
+                                         const stabilizerStep_t stabilizerStep)
 {
   struct vec r_error;
   struct vec v_error;
@@ -466,7 +439,7 @@ void controllerL1(control_t *control, const setpoint_t *setpoint,
 
   control->controlMode = controlModeLegacy;
 
-  if (!RATE_DO_EXECUTE(ATTITUDE_RATE, tick)) {
+  if (!RATE_DO_EXECUTE(ATTITUDE_RATE, stabilizerStep)) {
     return;
   }
 
@@ -702,6 +675,7 @@ PARAM_ADD(PARAM_FLOAT, kd_omega_rp, &kd_omega_rp)
 
 // L1
 PARAM_ADD(PARAM_UINT8, inj_enable, &inj_enable)
+PARAM_ADD(PARAM_UINT8, is_active_controller, &is_active_controller)
 
 // LPF cutoff frequencies
 PARAM_ADD(PARAM_FLOAT, w_f1, &w_f1)
@@ -789,3 +763,35 @@ LOG_ADD(LOG_FLOAT, w_m1, &w_m1)
 LOG_ADD(LOG_FLOAT, w_m2, &w_m2)
 
 LOG_GROUP_STOP(ctrlL1)
+
+
+// //////////////////////////////////////////////////////////////////////////////
+// //// the following is necessary to configure L1 controller for OOT build /////
+// //////////////////////////////////////////////////////////////////////////////
+
+// #define DEBUG_MODULE "CONTROLLER_L1"
+// #include "debug.h"
+
+// void appMain() {
+//   DEBUG_PRINT("Waiting for activation ...\n");
+
+//   while(1) {
+//     vTaskDelay(M2T(2000));
+//   }
+// }
+
+// void controllerOutOfTreeInit() {
+//   controllerL1Init();
+// }
+
+// void controllerOutOfTreeReset() {
+//   controllerL1Reset();
+// }
+
+// bool controllerOutOfTreeTest() {
+//   return controllerL1Test();
+// }
+
+// void controllerOutOfTree(control_t *control, const setpoint_t *setpoint, const sensorData_t *sensors, const state_t *state, const stabilizerStep_t stabilizerStep) {
+//   controllerL1(control, setpoint, sensors, state, stabilizerStep);
+// }
