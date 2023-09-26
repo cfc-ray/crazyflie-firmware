@@ -61,10 +61,10 @@ static float kp_z = 1.25;
 
 static float kv_x = 0.2;
 static float kv_y = 0.2;
-static float kv_z = 0.4;
+static float kv_z = 0.5;
 
-static float kr_x = 70000;
-static float kr_y = 70000;
+static float kr_x = 100000;
+static float kr_y = 100000;
 static float kr_z = 40000;
 
 static float ko_x = 15000;
@@ -165,7 +165,7 @@ static float cmd_yaw_prev;
 // other
 static float sigma_inj_fz = 0.0f;
 
-void resetL1(void)
+void controllerL1Reset(void)
 {
   // reset state predictor
   v_hat = mkvec(0.0f, 0.0f, 0.0f);
@@ -194,15 +194,10 @@ void resetL1(void)
   adj_SI_moments = mkvec(0.0f, 0.0f, 0.0f);
   adj_SI_thrust_prev = 0.0f;
   adj_SI_moments_prev = mkvec(0.0f, 0.0f, 0.0f);
-}
-
-
-void controllerL1Reset(void)
-{
+  
+  // reset uncertainty injection
   inj_enable = 0;
   inj_enable_prev = 0;
-
-  resetL1();
 }
 
 void controllerL1Init(void)
