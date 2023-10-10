@@ -61,14 +61,14 @@ static float kp_z = 1.25;
 
 static float kv_x = 0.2;
 static float kv_y = 0.2;
-static float kv_z = 0.5;
+static float kv_z = 0.4;
 
-static float kr_x = 100000;
-static float kr_y = 100000;
-static float kr_z = 40000;
+static float kr_x = 70000;
+static float kr_y = 70000;
+static float kr_z = 60000;
 
-static float ko_x = 15000;
-static float ko_y = 15000;
+static float ko_x = 20000;
+static float ko_y = 20000;
 static float ko_z = 12000;
 
 static float kd_omega_rp = 200;
@@ -106,10 +106,10 @@ static struct vec sigma_f;
 static struct vec sigma_m;
 
 // low pass filter
-static float w_f1 =  3.0f;
-static float w_f2 =  2.0f;
+static float w_f1 =  1.0f;
+static float w_f2 =  1.0f;
 static float w_m1 = 10.0f;
-static float w_m2 =  2.0f;
+static float w_m2 =  1.0f;
 
 static float lpf_f1_coef1;
 static float lpf_f1_coef2;
